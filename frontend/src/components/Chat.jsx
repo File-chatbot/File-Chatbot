@@ -1,106 +1,96 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FiSend, FiPlus, FiClock } from 'react-icons/fi';
 
 const API_URL = 'http://localhost:4000/api';
 
 const Chat = () => {
     const [messages, setMessages] = useState([]);
-    const [inputMessage, setInputMessage] = useState('');
+    const [input, setInput] = useState('');
     const [chatId, setChatId] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [chats, setChats] = useState([]);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const messagesEndRef = useRef(null);
     const { user, logout } = useAuth();
+    const navigate = useNavigate();
 
     const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
 
-    useEffect(() => {
-        fetchChats();
-    }, []);
-
-    const fetchChats = async () => {
-        try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/chats`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error('Failed to fetch chats');
-            }
-            
-            const data = await response.json();
-            setChats(data);
-        } catch (error) {
-            console.error('Error fetching chats:', error);
-            setError('Failed to load chat history');
-        }
-    };
-
     const startNewChat = async () => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            toast.error('Please sign in to continue');
+            navigate('/login');
+            return null;
+        }
+
         try {
-            setError(null);
-            const token = localStorage.getItem('token');
+            console.log('Starting new chat...');
             const response = await fetch(`${API_URL}/chats/start`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
-                },
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            setChatId(data._id);
-            setMessages([]);
-            fetchChats(); // Refresh chat list
-        } catch (error) {
-            console.error('Error starting chat:', error);
-            setError('Failed to start chat. Please try again.');
-        }
-    };
-
-    const loadChat = async (id) => {
-        try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/chats/${id}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
                 }
             });
-            
-            if (!response.ok) {
-                throw new Error('Failed to load chat');
-            }
-            
+
             const data = await response.json();
-            setChatId(id);
-            setMessages(data.messages);
-        } catch (error) {
-            console.error('Error loading chat:', error);
-            setError('Failed to load chat');
+            console.log('New chat response:', data);
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to start new chat');
+            }
+
+            setChatId(data._id);
+            setMessages([]);
+            toast.success('New chat started');
+            return data._id;
+        } catch (err) {
+            console.error('Error starting new chat:', err);
+            toast.error(err.message || 'Failed to start new chat');
+            return null;
         }
     };
 
-    const sendMessage = async () => {
-        if (!inputMessage.trim() || !chatId) return;
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!input.trim()) return;
 
+        const token = localStorage.getItem('token');
+        if (!token) {
+            toast.error('Please sign in to continue');
+            navigate('/login');
+            return;
+        }
+
+        // If no chatId exists, start a new chat first
+        let currentChatId = chatId;
+        if (!currentChatId) {
+            currentChatId = await startNewChat();
+            if (!currentChatId) {
+                toast.error('Failed to start new chat');
+                return;
+            }
+        }
+
+        const newMessage = { role: 'user', content: input };
+        setMessages(prev => [...prev, newMessage]);
+        setInput('');
         setIsLoading(true);
         setError(null);
+
         try {
-            const token = localStorage.getItem('token');
+            console.log('Sending message to chat:', currentChatId);
             const response = await fetch(`${API_URL}/chats/message`, {
                 method: 'POST',
                 headers: {
@@ -108,152 +98,174 @@ const Chat = () => {
                     'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    chatId,
-                    message: inputMessage,
-                }),
+                    chatId: currentChatId,
+                    message: input
+                })
             });
 
+            const data = await response.json();
+            console.log('Message response:', data);
+
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                if (response.status === 401) {
+                    toast.error('Session expired. Please sign in again.');
+                    logout();
+                    navigate('/login');
+                    return;
+                }
+                throw new Error(data.error || 'Failed to send message');
             }
 
-            const data = await response.json();
             setMessages(data.messages);
-            setInputMessage('');
-            fetchChats(); // Refresh chat list
-        } catch (error) {
-            console.error('Error sending message:', error);
-            setError('Failed to send message. Please try again.');
+            toast.success('Message sent successfully');
+        } catch (err) {
+            console.error('Error sending message:', err);
+            setError(err.message);
+            toast.error(err.message || 'Failed to send message');
+            // Remove the failed message from the UI
+            setMessages(prev => prev.slice(0, -1));
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleKeyPress = (e) => {
-        if (e.key === 'Enter' && !isLoading) {
-            sendMessage();
+    const handleNewChat = async () => {
+        const newChatId = await startNewChat();
+        if (newChatId) {
+            setError(null);
+        }
+    };
+
+    const handleSignOut = async () => {
+        try {
+            await logout();
+            navigate('/login');
+            toast.success('Signed out successfully');
+        } catch (error) {
+            toast.error('Failed to sign out');
         }
     };
 
     return (
-        <div className="flex h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-            {/* Sidebar */}
-            <div className="w-64 bg-white shadow-lg">
-                <div className="p-4 border-b bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold">Exam Buddy</h2>
-                        <button
-                            onClick={startNewChat}
-                            className="px-3 py-1 text-sm bg-white text-indigo-600 rounded-full hover:bg-indigo-50 transition-colors"
-                        >
-                            New Chat
-                        </button>
-                    </div>
-                    <div className="mt-2 text-sm text-indigo-100">
-                        {user.email}
-                    </div>
-                </div>
-                <div className="overflow-y-auto h-[calc(100vh-8rem)]">
-                    {chats.map((chat) => (
-                        <div
-                            key={chat._id}
-                            onClick={() => loadChat(chat._id)}
-                            className={`p-3 cursor-pointer hover:bg-indigo-50 transition-colors ${
-                                chatId === chat._id ? 'bg-indigo-100 border-l-4 border-indigo-600' : ''
-                            }`}
-                        >
-                            <div className="text-sm truncate">
-                                {chat.messages[0]?.content || 'New Chat'}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                                {new Date(chat.updatedAt).toLocaleDateString()}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-                <div className="p-4 border-t">
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="chat-container"
+        >
+            <div className="chat-header">
+                <button
+                    onClick={handleSignOut}
+                    className="text-gray-600 hover:text-gray-800 transition-colors"
+                >
+                    Sign Out
+                </button>
+                <h1 className="text-2xl font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                    Exam Buddy
+                </h1>
+                <div className="flex items-center gap-2">
                     <button
-                        onClick={logout}
-                        className="w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+                        onClick={() => setIsHistoryOpen(true)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors"
                     >
-                        Sign Out
+                        <FiClock className="w-5 h-5 text-gray-600" />
+                        <span className="text-gray-600">History</span>
+                    </button>
+                    <button
+                        onClick={handleNewChat}
+                        className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                        title="New Chat"
+                    >
+                        <FiPlus className="w-5 h-5 text-gray-600" />
                     </button>
                 </div>
             </div>
 
-            {/* Chat Area */}
-            <div className="flex-1 flex flex-col">
-                <div className="flex-1 overflow-y-auto p-4">
-                    {error && (
-                        <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-4 shadow-sm">
-                            {error}
-                        </div>
-                    )}
-
-                    {messages.length === 0 && !isLoading && (
-                        <div className="h-full flex items-center justify-center text-gray-500">
-                            <div className="text-center">
-                                <h2 className="text-2xl font-bold mb-2 text-indigo-600">Welcome to Exam Buddy!</h2>
-                                <p className="text-gray-600">Your AI study companion. Start a new conversation or select a previous chat.</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {messages.map((msg, index) => (
-                        <div
-                            key={index}
-                            className={`flex mb-4 ${
-                                msg.role === 'user' ? 'justify-end' : 'justify-start'
-                            }`}
-                        >
-                            <div
-                                className={`max-w-[70%] rounded-2xl p-4 ${
-                                    msg.role === 'user'
-                                        ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white'
-                                        : 'bg-white shadow-lg'
-                                }`}
-                            >
-                                {msg.content}
-                            </div>
-                        </div>
-                    ))}
-
-                    {isLoading && (
-                        <div className="flex justify-start mb-4">
-                            <div className="bg-white shadow-lg rounded-2xl p-4">
-                                <div className="flex space-x-2">
-                                    <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
-                                    <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-100"></div>
-                                    <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-200"></div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </div>
-
-                <div className="border-t p-4 bg-white shadow-lg">
-                    <div className="flex space-x-4 max-w-4xl mx-auto">
-                        <input
-                            type="text"
-                            value={inputMessage}
-                            onChange={(e) => setInputMessage(e.target.value)}
-                            onKeyPress={handleKeyPress}
-                            placeholder="Type your message..."
-                            className="flex-1 border rounded-full px-6 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                            disabled={!chatId || isLoading}
-                        />
-                        <button
-                            onClick={sendMessage}
-                            disabled={!inputMessage.trim() || !chatId || isLoading}
-                            className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-full hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 transition-all shadow-md"
-                        >
-                            {isLoading ? 'Sending...' : 'Send'}
-                        </button>
+            <div className="chat-messages">
+                {messages.length === 0 ? (
+                    <div className="empty-state">
+                        <h2 className="text-2xl font-semibold text-gray-700 mb-4">
+                            Welcome to Exam Buddy!
+                        </h2>
+                        <p className="text-gray-500">
+                            Start a conversation by typing a message below.
+                        </p>
                     </div>
-                </div>
+                ) : (
+                    <AnimatePresence>
+                        {messages.map((message, index) => (
+                            <motion.div
+                                key={index}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -20 }}
+                                className={`message ${message.role === 'user' ? 'user-message' : 'ai-message'}`}
+                            >
+                                {message.content}
+                            </motion.div>
+                        ))}
+                    </AnimatePresence>
+                )}
+                {isLoading && (
+                    <div className="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                )}
+                <div ref={messagesEndRef} />
             </div>
-        </div>
+
+            {error && (
+                <div className="error-message">
+                    {error}
+                </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="chat-input">
+                <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Type your message..."
+                    disabled={isLoading}
+                    className="flex-1"
+                />
+                <button
+                    type="submit"
+                    disabled={isLoading || !input.trim()}
+                    className="send-button"
+                >
+                    <FiSend className="w-5 h-5" />
+                </button>
+            </form>
+
+            <AnimatePresence>
+                {isHistoryOpen && (
+                    <>
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="history-overlay"
+                            onClick={() => setIsHistoryOpen(false)}
+                        />
+                        <motion.div
+                            initial={{ x: -320 }}
+                            animate={{ x: 0 }}
+                            exit={{ x: -320 }}
+                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                            className="history-panel"
+                        >
+                            <div className="p-4">
+                                <h2 className="text-xl font-semibold mb-4">Chat History</h2>
+                                {/* Add your chat history items here */}
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
+        </motion.div>
     );
 };
 
