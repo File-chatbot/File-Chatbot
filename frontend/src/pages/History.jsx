@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-hot-toast';
+import { API_URL } from '../config';
 
 const History = () => {
     const [chatHistory, setChatHistory] = useState([]);
@@ -20,7 +22,7 @@ const History = () => {
                 throw new Error('No authentication token found');
             }
 
-            const response = await fetch('http://localhost:4000/api/chats', {
+            const response = await fetch(`${API_URL}/chats`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -28,7 +30,8 @@ const History = () => {
             });
 
             if (!response.ok) {
-                throw new Error('Failed to fetch chat history');
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to fetch chat history');
             }
 
             const data = await response.json();
@@ -37,6 +40,7 @@ const History = () => {
         } catch (error) {
             console.error('Error fetching chat history:', error);
             setError(error.message);
+            toast.error(error.message || 'Failed to fetch chat history');
         } finally {
             setIsLoading(false);
         }
@@ -46,8 +50,10 @@ const History = () => {
         try {
             await logout();
             navigate('/login');
+            toast.success('Signed out successfully');
         } catch (error) {
             console.error('Error signing out:', error);
+            toast.error('Failed to sign out');
         }
     };
 
@@ -63,85 +69,78 @@ const History = () => {
         });
     };
 
-    const getMessagePreview = (messages) => {
-        if (!messages || messages.length === 0) return 'No messages';
-        const firstMessage = messages[0].content;
-        return firstMessage.length > 50 ? firstMessage.substring(0, 50) + '...' : firstMessage;
-    };
+    if (isLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <h2 className="text-2xl font-semibold text-red-600 mb-4">Error</h2>
+                    <p className="text-gray-600 mb-4">{error}</p>
+                    <button
+                        onClick={fetchChatHistory}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                    >
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-sky-50 to-blue-50">
-            {/* Header */}
-            <nav className="bg-white shadow-sm">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16 items-center">
-                        <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-blue-600 bg-clip-text text-transparent">
-                            Chat History
-                        </h1>
+        <div className="min-h-screen bg-gray-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="flex justify-between items-center mb-8">
+                    <h1 className="text-3xl font-bold text-gray-900">Chat History</h1>
+                    <button
+                        onClick={handleSignOut}
+                        className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                    >
+                        Sign Out
+                    </button>
+                </div>
+
+                {chatHistory.length === 0 ? (
+                    <div className="text-center py-12">
+                        <h2 className="text-2xl font-semibold text-gray-700 mb-4">No Chat History</h2>
+                        <p className="text-gray-500 mb-8">Start a new chat to see your history here.</p>
                         <button
                             onClick={() => navigate('/chat')}
-                            className="px-4 py-2 text-sky-600 hover:text-sky-700 font-medium"
+                            className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
                         >
-                            Back to Chat
+                            Start New Chat
                         </button>
                     </div>
-                </div>
-            </nav>
-
-            {/* Main Content */}
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg mb-6">
-                        {error}
-                    </div>
-                )}
-
-                {isLoading ? (
-                    <div className="flex justify-center items-center h-64">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-600"></div>
-                    </div>
-                ) : chatHistory.length === 0 ? (
-                    <div className="text-center py-12">
-                        <p className="text-gray-600 text-lg">No chat history found</p>
-                    </div>
                 ) : (
-                    <div className="space-y-4">
+                    <div className="grid gap-6">
                         {chatHistory.map((chat) => (
                             <div
                                 key={chat._id}
                                 onClick={() => navigate(`/chat/${chat._id}`)}
                                 className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow p-6 cursor-pointer"
                             >
-                                <div className="flex justify-between items-start mb-2">
-                                    <div className="flex items-center space-x-3">
-                                        <div className="w-10 h-10 bg-sky-100 rounded-full flex items-center justify-center">
-                                            <span className="text-sky-600 font-medium">
-                                                {user?.email?.charAt(0).toUpperCase()}
-                                            </span>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm text-gray-600">{user?.email}</p>
-                                            <p className="text-xs text-gray-400">{formatDate(chat.createdAt)}</p>
-                                        </div>
-                                    </div>
+                                <div className="flex justify-between items-start mb-4">
+                                    <h3 className="text-lg font-semibold text-gray-900">
+                                        {chat.preview || 'New Chat'}
+                                    </h3>
+                                    <span className="text-sm text-gray-500">
+                                        {formatDate(chat.updatedAt)}
+                                    </span>
                                 </div>
-                                <p className="text-gray-700 mt-2">
-                                    {getMessagePreview(chat.messages)}
-                                </p>
+                                <div className="text-sm text-gray-500">
+                                    {chat.messageCount} message{chat.messageCount !== 1 ? 's' : ''}
+                                </div>
                             </div>
                         ))}
                     </div>
                 )}
-
-                {/* Sign Out Button */}
-                <div className="mt-8 text-center">
-                    <button
-                        onClick={handleSignOut}
-                        className="px-6 py-2 bg-gradient-to-r from-sky-600 to-blue-600 text-white rounded-lg hover:from-sky-700 hover:to-blue-700 transition-all shadow-sm"
-                    >
-                        Sign Out
-                    </button>
-                </div>
             </div>
         </div>
     );

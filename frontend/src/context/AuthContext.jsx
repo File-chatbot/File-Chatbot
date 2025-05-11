@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 
-const API_URL = 'http://localhost:4000/api';
+const API_URL = 'http://localhost:3000/api';
 
 const AuthContext = createContext(null);
 
@@ -13,10 +13,29 @@ export const AuthProvider = ({ children }) => {
         const token = localStorage.getItem('token');
         const userData = localStorage.getItem('user');
         if (token && userData) {
+            try {
             setUser(JSON.parse(userData));
+            } catch (error) {
+                console.error('Error parsing user data:', error);
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+            }
         }
         setLoading(false);
     }, []);
+
+    const handleResponse = async (response) => {
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response');
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || data.message || 'Request failed');
+        }
+        return data;
+    };
 
     const login = async (email, password) => {
         try {
@@ -28,16 +47,14 @@ export const AuthProvider = ({ children }) => {
                 body: JSON.stringify({ email, password }),
             });
 
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.error || 'Login failed');
-            }
+            const data = await handleResponse(response);
 
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
             setUser(data.user);
             return data;
         } catch (error) {
+            console.error('Login error:', error);
             throw error;
         }
     };
@@ -52,16 +69,14 @@ export const AuthProvider = ({ children }) => {
                 body: JSON.stringify({ email, password }),
             });
 
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.error || 'Signup failed');
-            }
+            const data = await handleResponse(response);
 
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
             setUser(data.user);
             return data;
         } catch (error) {
+            console.error('Signup error:', error);
             throw error;
         }
     };
